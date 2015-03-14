@@ -1,23 +1,33 @@
 package com.hackvg.domain;
 
-import com.hackvg.model.entities.PopularMoviesApiResponse;
-import com.hackvg.model.entities.PopularShowsApiResponse;
+import com.hackvg.model.entities.MoviesWrapper;
 
 /**
- * Created by saulmm on 31/01/15.
+ * Representation of an use case to get the most popular movies
  */
+@SuppressWarnings("UnusedDeclaration")
 public interface GetMoviesUsecase extends Usecase {
 
-    public static final int TV_SHOWS = 0;
-    public static final int TV_MOVIES = 1;
+    /**
+     * Callback used to be notified when the most popular Movies have been
+     * received
+     *
+     * @param response the response containing a list with movies
+     */
+    public void onPopularMoviesReceived(MoviesWrapper response);
 
-    public void getPopularShows();
+    /**
+     * Request datasource the most popular movies
+     */
+    public void requestPopularMovies();
 
-    public void getPopularMovies ();
+    /**
+     * Sends the PopularMoviesApiResponse thought the communication system
+     * to be received by the presenter in another module
+     *
+     * @param response the response containing a list with movies
+     */
+    public void sendMoviesToPresenter (MoviesWrapper response);
 
-    public void onPopularShowsReceived (PopularShowsApiResponse response);
-
-    public void onPopularMoviesReceived(PopularMoviesApiResponse response);
-
-    public void sendShowsToPresenter ();
+    public void unRegister ();
 }

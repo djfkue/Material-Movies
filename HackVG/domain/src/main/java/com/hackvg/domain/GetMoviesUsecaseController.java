@@ -1,71 +1,62 @@
 package com.hackvg.domain;
 
 import com.hackvg.common.utils.BusProvider;
-import com.hackvg.model.MediaDataSource;
-import com.hackvg.model.entities.PopularMoviesApiResponse;
-import com.hackvg.model.entities.PopularShowsApiResponse;
-import com.hackvg.model.entities.TvMovie;
-import com.hackvg.model.rest.RestMovieSource;
+import com.hackvg.model.entities.MoviesWrapper;
+import com.hackvg.model.rest.RestDataSource;
+import com.squareup.otto.Bus;
 import com.squareup.otto.Subscribe;
 
-import java.util.List;
-
 /**
- * Created by saulmm on 31/01/15.
+ * This class is an implementation of {@link GetMoviesUsecase}
  */
 public class GetMoviesUsecaseController implements GetMoviesUsecase {
 
-    private final MediaDataSource dataSource;
-    private final int mode;
+    private final RestDataSource mDataSource;
+    private final Bus mUiBus;
+    private int mCurrentPage = 1;
 
-    private PopularMoviesApiResponse response;
+    /**
+     * Constructor of the class.
+     *
+     * @param uiBus The bus to communicate the domain module and the app module
+     * @param dataSource The data source to retrieve the list of movies
+     */
+    public GetMoviesUsecaseController(RestDataSource dataSource, Bus uiBus) {
 
-    public GetMoviesUsecaseController(int mode) {
+        if (dataSource == null)
+            throw new IllegalArgumentException("MediaDataSource cannot be null");
 
-        this.dataSource = RestMovieSource.getInstance();
-        this.mode = mode;
+        if (uiBus == null)
+            throw new IllegalArgumentException("Bus cannot be null");
+
+        mDataSource = dataSource;
+        mUiBus = uiBus;
 
         BusProvider.getRestBusInstance().register(this);
     }
 
-    @Override
-    public void getPopularShows() {
-
-        dataSource.getShows();
-    }
 
     @Override
-    public void getPopularMovies() {
+    public void requestPopularMovies() {
 
-        dataSource.getMovies ();
+        mDataSource.getMoviesByPage(mCurrentPage);
     }
 
     @Subscribe
     @Override
-    public void onPopularShowsReceived(PopularShowsApiResponse response) {
+    public void onPopularMoviesReceived(MoviesWrapper response) {
 
-    }
-
-    @Subscribe
-    @Override
-    public void onPopularMoviesReceived(PopularMoviesApiResponse response) {
-
-        this.response = response;
-        sendShowsToPresenter();
+        sendMoviesToPresenter(response);
     }
 
     @Override
-    public void sendShowsToPresenter() {
+    public void sendMoviesToPresenter (MoviesWrapper response) {
 
-        switch (mode) {
+        mUiBus.post(response);
+    }
 
-            case GetMoviesUsecase.TV_MOVIES:
-                BusProvider.getUIBusInstance().post(response);
-                break;
-
-            case GetMoviesUsecase.TV_SHOWS:
-                break;
-        }
+    @Override
+    public void unRegister() {
 
         BusProvider.getRestBusInstance().unregister(this);
     }
@@ -73,15 +64,7 @@ public class GetMoviesUsecaseController implements GetMoviesUsecase {
     @Override
     public void execute() {
 
-        switch (mode) {
-
-            case GetMoviesUsecase.TV_MOVIES:
-                getPopularMovies();
-                break;
-
-            case GetMoviesUsecase.TV_SHOWS:
-                getPopularShows();
-                break;
-        }
+        requestPopularMovies();
+        mCurrentPage++;
     }
 }

@@ -1,87 +1,147 @@
 package com.hackvg.android.views.activities;
 
+import android.annotation.TargetApi;
 import android.app.ActivityOptions;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBarActivity;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.Toolbar;
+import android.util.Log;
 import android.util.Pair;
 import android.util.SparseArray;
 import android.view.View;
 import android.view.animation.AnimationUtils;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
-import android.widget.Toolbar;
+import android.widget.Toast;
 
-import com.hackvg.android.utils.HackVGClickListener;
 import com.hackvg.android.R;
+import com.hackvg.android.mvp.presenters.MoviesPresenter;
+import com.hackvg.android.mvp.views.MoviesView;
+import com.hackvg.android.utils.RecyclerInsetsDecoration;
+import com.hackvg.android.utils.RecyclerViewClickListener;
 import com.hackvg.android.views.adapters.MoviesAdapter;
 import com.hackvg.android.views.fragments.NavigationDrawerFragment;
-import com.hackvg.android.mvp.views.PopularMoviesView;
-import com.hackvg.android.mvp.presenters.PopularShowsPresenterImpl;
-import com.hackvg.android.utils.RecyclerInsetsDecoration;
-import com.hackvg.model.entities.TvMovie;
+import com.hackvg.model.entities.Movie;
+import com.hackvg.model.entities.MoviesWrapper;
+import com.nispok.snackbar.Snackbar;
+import com.nispok.snackbar.SnackbarManager;
 
 import java.util.List;
 
 import butterknife.ButterKnife;
 import butterknife.InjectView;
+import butterknife.Optional;
 
 
 public class MoviesActivity extends ActionBarActivity implements
-    PopularMoviesView, HackVGClickListener, View.OnClickListener {
+    MoviesView, RecyclerViewClickListener, View.OnClickListener {
 
-    private static final int COLUMNS = 2;
+    /**
+     * A container used between this activity and MovieDetailActivity
+     * to share a Bitmap with a SharedElementTransition
+     */
+    public static SparseArray<Bitmap> sPhotoCache = new SparseArray<Bitmap>(1);
 
-    @InjectView(R.id.recycler_popular_movies)   RecyclerView popularMoviesRecycler;
-    @InjectView(R.id.activity_main_progress)    ProgressBar progress;
-    @InjectView(R.id.activity_main_toolbar)     Toolbar toolbar;
+    private MoviesAdapter mMoviesAdapter;
+    private MoviesPresenter mMoviesPresenter;
+    private GridLayoutManager mGridLayoutManager;
 
-    private MoviesAdapter moviesAdapter;
-    public static SparseArray<Bitmap> photoCache = new SparseArray<Bitmap>(1);
+    public float mBackgroundTranslation;
+
+    int pastVisiblesItems, visibleItemCount, totalItemCount;
+
     private NavigationDrawerFragment mNavigationDrawerFragment;
-    private PopularShowsPresenterImpl popularShowsPresenter;
+
+    @InjectView(R.id.activity_movies_toolbar)   Toolbar mToolbar;
+    @InjectView(R.id.activity_movies_progress)  ProgressBar mProgressBar;
+    @InjectView(R.id.recycler_popular_movies)   RecyclerView mRecycler;
+
+    @Optional
+    @InjectView(R.id.activity_movies_background_view) View mTabletBackground;
+
+    private ImageView mCoverImage;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
         ButterKnife.inject(this);
 
-        // Set the toolbar as the SupportActionbar
-        setActionBar(toolbar);
-        getActionBar().setTitle("");
-        getActionBar().setHomeAsUpIndicator(
-            getDrawable(R.drawable.ic_menu_white_24dp));
+        setSupportActionBar(mToolbar);
+        getSupportActionBar().setTitle("");
 
-        toolbar.setNavigationOnClickListener(this);
+        getSupportActionBar().setHomeAsUpIndicator(
+            R.drawable.ic_menu_white_24dp);
 
-        popularMoviesRecycler.setLayoutManager(new GridLayoutManager(this, COLUMNS));
-        popularMoviesRecycler.addItemDecoration(new RecyclerInsetsDecoration(this));
-        popularMoviesRecycler.setOnScrollListener(recyclerScrollListener);
+        mToolbar.setNavigationOnClickListener(this);
+
+        mRecycler.addItemDecoration(new RecyclerInsetsDecoration(this));
+        mRecycler.setOnScrollListener(recyclerScrollListener);
 
         mNavigationDrawerFragment = (NavigationDrawerFragment)
             getFragmentManager().findFragmentById(R.id.navigation_drawer);
 
-        // Set up the drawer.
         mNavigationDrawerFragment.setUp(R.id.navigation_drawer,
             (DrawerLayout) findViewById(R.id.drawer_layout));
 
-        popularShowsPresenter = new PopularShowsPresenterImpl(this);
-        popularShowsPresenter.onCreate();
+        if (savedInstanceState == null) {
+
+            mMoviesPresenter = new MoviesPresenter(this);
+
+        } else {
+
+            MoviesWrapper moviesWrapper = (MoviesWrapper) savedInstanceState
+                .getSerializable("movies_wrapper");
+
+            mMoviesPresenter = new MoviesPresenter(this, moviesWrapper);
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    @Override
+    public void onActivityReenter(int resultCode, Intent data) {
+
+        super.onActivityReenter(resultCode, data);
+        Log.d("[DEBUG]", "MoviesActivity onActivityReenter - Re-enter");
     }
 
     @Override
     protected void onStop() {
 
         super.onStop();
-        popularShowsPresenter.onStop();
+        mMoviesPresenter.stop();
+    }
+
+    @Override
+    protected void onStart() {
+
+        super.onStart();
+        mMoviesPresenter.start();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+
+        super.onSaveInstanceState(outState);
+
+        if (mMoviesAdapter != null) {
+
+            outState.putSerializable("movies_wrapper",
+                new MoviesWrapper(mMoviesAdapter.getMovieList()));
+
+            outState.putFloat("background_translation", mBackgroundTranslation);
+        }
+
     }
 
     @Override
@@ -91,55 +151,131 @@ public class MoviesActivity extends ActionBarActivity implements
     }
 
     @Override
-    public void showMovies(List<TvMovie> movieList) {
+    public void showMovies(List<Movie> movieList) {
 
-        moviesAdapter = new MoviesAdapter(movieList);
-        moviesAdapter.setHackVGClickListener(this);
-        popularMoviesRecycler.setAdapter(moviesAdapter);
+        mMoviesAdapter = new MoviesAdapter(movieList);
+        mMoviesAdapter.setRecyclerListListener(this);
+        mRecycler.setAdapter(mMoviesAdapter);
     }
 
     @Override
     public void showLoading() {
 
-        progress.setVisibility(View.VISIBLE);
+        mProgressBar.setVisibility(View.VISIBLE);
     }
 
     @Override
     public void hideLoading() {
 
-        progress.setVisibility(View.GONE);
+        mProgressBar.setVisibility(View.GONE);
     }
 
     @Override
     public void showError(String error) {
 
+        // TODO
     }
 
     @Override
     public void hideError() {
 
+        // TODO
     }
 
     @Override
-    public void onClick(View v, int position) {
+    public void showLoadingLabel() {
 
-        Intent i = new Intent (MoviesActivity.this, MVPDetailActivity.class);
-        String movieID = moviesAdapter.getMovieList().get(position).getId();
-        i.putExtra("movie_id", movieID);
-        i.putExtra("movie_position", position);
+        Snackbar loadingSnackBar = Snackbar.with(this)
+            .text("Loading more films")
+            .actionLabel("Cancel")
+            .duration(Snackbar.SnackbarDuration.LENGTH_INDEFINITE)
+            .color(getResources().getColor(R.color.theme_primary))
+            .actionColor(getResources().getColor(R.color.theme_accent));
 
-        ImageView coverImage = (ImageView) v.findViewById(R.id.item_movie_cover);
-        photoCache.put(0, coverImage.getDrawingCache());
+        SnackbarManager.show(loadingSnackBar);
+    }
 
-        // Setup the transition to the detail activity
+    @Override
+    public void hideActionLabel() {
+
+        SnackbarManager.dismiss();
+    }
+
+    @Override
+    public boolean isTheListEmpty() {
+
+        return (mMoviesAdapter == null) || mMoviesAdapter.getMovieList().isEmpty();
+
+    }
+
+    @Override
+    public void appendMovies(List<Movie> movieList) {
+
+        mMoviesAdapter.appendMovies(movieList);
+    }
+
+
+    @Override
+    public void onClick(View touchedView, int moviePosition, float touchedX, float touchedY) {
+
+        Intent movieDetailActivityIntent = new Intent (
+            MoviesActivity.this, MovieDetailActivity.class);
+
+        String movieID = mMoviesAdapter.getMovieList().get(moviePosition).getId();
+        movieDetailActivityIntent.putExtra("movie_id", movieID);
+        movieDetailActivityIntent.putExtra("movie_position", moviePosition);
+
+        mCoverImage = (ImageView) touchedView.findViewById(R.id.item_movie_cover);
+        BitmapDrawable bitmapDrawable = (BitmapDrawable) mCoverImage.getDrawable();
+
+        if (mMoviesAdapter.isMovieReady(moviePosition) || bitmapDrawable != null) {
+
+            sPhotoCache.put(0, bitmapDrawable.getBitmap());
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                startSharedElementPosition(touchedView,
+                    moviePosition, movieDetailActivityIntent);
+            }
+
+            else
+                startDetailActivityByAnimation(touchedView,
+                    (int) touchedX, (int) touchedY, movieDetailActivityIntent);
+
+        } else {
+
+            Toast.makeText(this, "Movie loading, please wait", Toast.LENGTH_SHORT)
+                .show();
+        }
+    }
+
+    private void startDetailActivityByAnimation(View touchedView,
+        int touchedX, int touchedY, Intent movieDetailActivityIntent) {
+
+        int[] touchedLocation = {touchedX, touchedY};
+        int[] locationAtScreen = new int [2];
+        touchedView.getLocationOnScreen(locationAtScreen);
+
+        int finalLocationX = locationAtScreen[0] + touchedLocation[0];
+        int finalLocationY = locationAtScreen[1] + touchedLocation[1];
+
+        int [] finalLocation = {finalLocationX, finalLocationY};
+        movieDetailActivityIntent.putExtra("view_location",
+            finalLocation);
+
+        startActivity(movieDetailActivityIntent);
+    }
+
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    private void startSharedElementPosition(View touchedView,
+        int moviePosition, Intent movieDetailActivityIntent) {
+
         ActivityOptions options = ActivityOptions.makeSceneTransitionAnimation(
-            this, new Pair<View, String>(v, "cover" + position));
+            this, new Pair<>(touchedView, "cover" + moviePosition));
 
-        startActivity(i, options.toBundle());
+        startActivity(movieDetailActivityIntent, options.toBundle());
     }
 
     private RecyclerView.OnScrollListener recyclerScrollListener = new RecyclerView.OnScrollListener() {
-        public int lastDy;
         public boolean flag;
 
         @Override
@@ -147,41 +283,53 @@ public class MoviesActivity extends ActionBarActivity implements
 
             super.onScrolled(recyclerView, dx, dy);
 
-                if (toolbar == null)
-                    throw new IllegalStateException("BooksFragment has not a reference of the main toolbar");
+            visibleItemCount = mRecycler.getLayoutManager().getChildCount();
+            totalItemCount = mRecycler.getLayoutManager().getItemCount();
+            pastVisiblesItems = ((GridLayoutManager) mRecycler.getLayoutManager()).findFirstVisibleItemPosition();
 
-                // Is scrolling up
-                if (dy > 10) {
+            if((visibleItemCount+pastVisiblesItems) >= totalItemCount && !mMoviesPresenter.isLoading()) {
+                mMoviesPresenter.onEndListReached();
+            }
 
-                    if (!flag) {
+            if (mTabletBackground != null) {
 
-                        showToolbar();
-                        flag = true;
-                    }
+                mBackgroundTranslation = mTabletBackground.getY() - (dy / 2);
+                mTabletBackground.setTranslationY(mBackgroundTranslation);
+            }
 
-                // is scrolling down
-                } else if (dy < -10) {
+            // Is scrolling up
+            if (dy > 10) {
 
-                    if (flag) {
+                if (!flag) {
 
-                        hideToolbar();
-                        flag = false;
-                    }
+                    showToolbar();
+                    flag = true;
                 }
 
-                lastDy = dy;
+            // Is scrolling down
+            } else if (dy < -10) {
+
+                if (flag) {
+
+                    hideToolbar();
+                    flag = false;
+                }
             }
+
+        }
     };
+
+
 
     private void showToolbar() {
 
-        toolbar.startAnimation(AnimationUtils.loadAnimation(this,
+        mToolbar.startAnimation(AnimationUtils.loadAnimation(this,
             R.anim.translate_up_off));
     }
 
     private void hideToolbar() {
 
-        toolbar.startAnimation(AnimationUtils.loadAnimation(this,
+        mToolbar.startAnimation(AnimationUtils.loadAnimation(this,
             R.anim.translate_up_on));
     }
 
